@@ -1,0 +1,932 @@
+---
+title: "Pruebas de hipóteis paramétricas"
+subtitle: "Teoria, ejemplos e implementación en R"
+author: 
+  - name: Dagoberto Salgado Horta
+    affiliation: "Universidad del Tolima"
+    affiliation-url: "https://www.ut.edu.co/"
+date: today
+lang: es
+title-block-banner: "#b8b1a3"
+
+format:
+  html:
+    page-layout: full
+    fontsize: 14pt
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código"
+    theme: dark
+    highlight-style: monokai
+    html-math-method: katex
+    smooth-scroll: true
+    link-external-newwindow: true
+    code-overflow: scroll
+    favicon: favicon.ico
+    
+editor: visual
+
+knitr:
+  opts_chunk:
+    message: false
+    warning: false
+    fig.align: center
+    fig.width: 6
+    fig.height: 6
+    out.width: "70%"
+---
+
+```{=html}
+<style>
+body{
+  background-color:#f7f6ed;
+  font-size:130%;
+  text-align:justify;
+}
+</style>
+```
+
+# Introducción
+
+Una prueba de hipótesis es un procedimiento de inferencia estadística que utiliza una muestra para evaluar una afirmación acerca de uno o varios parámetros poblacionales. Este documento presenta pruebas para medias, proporciones, varianzas y diferencias entre grupos, junto con herramientas gráficas y analíticas para examinar sus supuestos.
+
+## Objetivos de aprendizaje
+
+Al terminar, el lector podrá:
+
+- Formular hipótesis nulas y alternativas bilaterales o unilaterales.
+- Seleccionar un estadístico de prueba según el parámetro y el diseño muestral.
+- Examinar normalidad, valores atípicos e igualdad de varianzas cuando corresponda.
+- Ejecutar pruebas de hipótesis en R e interpretar el valor p y los intervalos de confianza.
+- Redactar conclusiones estadísticas sin confundir significación estadística con importancia práctica.
+
+# .Conceptos generales
+
+## .Hipótesis nula y alternativa
+
+La hipótesis nula ($H_0$) representa el valor de referencia que se contrasta. La hipótesis alternativa ($H_1$) representa la diferencia o dirección que interesa detectar.
+
+| Tipo           | Forma general           | Ejemplo                        |
+|----------------|-------------------------|--------------------------------|
+| Bilateral      | $H_1:\theta\ne\theta_0$ | El promedio es diferente de 70 |
+| Cola derecha   | $H_1:\theta>\theta_0$   | El promedio supera 70          |
+| Cola izquierda | $H_1:\theta<\theta_0$   | El promedio es menor que 70    |
+
+Por ejemplo, para contrastar si el puntaje medio de una evaluación es diferente de 70:
+
+$$H_0:\mu=70,\qquad H_1:\mu\ne70.$$
+
+## .Nivel de significación, errores y potencia
+
+El nivel de significación $\alpha$ es la probabilidad de cometer un error tipo I bajo $H_0$. Los valores habituales son 0.10, 0.05 y 0.01.
+
+- **Error tipo I:** rechazar $H_0$ siendo verdadera.
+- **Error tipo II:** no rechazar $H_0$ siendo falsa.
+- **Potencia:** probabilidad de rechazar $H_0$ cuando una alternativa determinada es verdadera.
+
+La regla basada en el valor p es:
+
+$$p\leq\alpha\Rightarrow\text{rechazar }H_0;\qquad
+p>\alpha\Rightarrow\text{no rechazar }H_0.$$
+
+No rechazar $H_0$ no demuestra que sea verdadera; indica que la evidencia muestral no basta para rechazarla al nivel seleccionado.
+
+## .Flujo de trabajo
+
+1.  Definir el parámetro y el diseño de muestreo.
+2.  Formular $H_0$, $H_1$ y $\alpha$ antes de observar los resultados.
+3.  Revisar independencia, calidad de datos y supuestos relevantes.
+4.  Calcular el estadístico y el valor p.
+5.  Informar estimación, intervalo de confianza, estadístico, grados de libertad cuando proceda, valor p y conclusión contextual.
+6.  Evaluar la importancia práctica del efecto, no solo su significación estadística.
+
+# .Exploración gráfica y evaluación de supuestos
+
+Las pruebas de normalidad son relevantes sobre todo para inferencias exactas en muestras pequeñas sobre medias y varianzas. No se exige que todas las variables del estudio sean normales. En pruebas de medias, lo que importa es la distribución de la variable dentro de cada grupo o, en un diseño pareado, la distribución de las diferencias.
+
+## .Datos de ejemplo
+
+Los datos siguientes son simulados para fines didácticos. Se pueden reproducir en R.
+
+```{r}
+set.seed(2026)
+
+puntaje <- round(rnorm(30, mean = 72, sd = 8), 1)
+grupo <- factor(rep(c("Método A", "Método B"), each = 15))
+calificacion <- c(
+  round(rnorm(15, mean = 70, sd = 7), 1),
+  round(rnorm(15, mean = 75, sd = 8), 1)
+)
+
+datos <- data.frame(grupo, calificacion)
+head(datos)
+summary(puntaje)
+```
+
+## .Histograma y curva normal
+
+El histograma permite examinar la forma de la distribución: simetría, asimetría, multimodalidad y observaciones extremas. La curva normal superpuesta es orientativa, no una prueba formal.
+
+```{r}
+hist(puntaje, probability = TRUE,
+     main = "Distribución de puntajes",
+     xlab = "Puntaje", col = "grey85", border = "white")
+curve(dnorm(x, mean = mean(puntaje), sd = sd(puntaje)),
+      add = TRUE, lwd = 2)
+```
+
+## .Diagrama de caja (*boxplot*)
+
+El boxplot resume la mediana, los cuartiles y posibles observaciones atípicas. Un punto marcado como atípico no debe eliminarse automáticamente: primero se verifica si es un error, un caso válido o una observación influyente.
+
+```{r}
+boxplot(puntaje, horizontal = TRUE,
+        main = "Boxplot de puntajes", xlab = "Puntaje",
+        col = "grey85")
+```
+
+Comparación por grupo:
+
+```{r}
+boxplot(calificacion ~ grupo, data = datos,
+        main = "Calificaciones por método",
+        xlab = "Método", ylab = "Calificación",
+        col = c("grey85", "grey70"))
+```
+
+## .Gráfico Q-Q normal
+
+El gráfico Q-Q compara los cuantiles observados con los cuantiles teóricos de una distribución normal. Los puntos aproximadamente alineados apoyan la plausibilidad de normalidad; curvaturas sistemáticas, colas alejadas o puntos extremos sugieren desviaciones.
+
+```{r}
+qqnorm(puntaje, main = "Gráfico Q-Q normal")
+qqline(puntaje, col = "red", lwd = 2)
+```
+
+## .Prueba de Shapiro-Wilk
+
+Hipótesis:
+
+$$H_0:\text{los datos son compatibles con una distribución normal}$$
+
+$$H_1:\text{los datos no son compatibles con una distribución normal}.$$
+
+```{r}
+shapiro.test(puntaje)
+```
+
+Interpretación: si $p<\alpha$, se rechaza la hipótesis de normalidad. Si $p\geq\alpha$, no se rechaza; esto **no prueba** que los datos sean normales. La prueba puede detectar desviaciones pequeñas con muestras grandes y tener poca potencia con muestras pequeñas. Debe combinarse con histograma, Q-Q plot, contexto y tamaño muestral.
+
+## .Gráficos diagnósticos con `ggplot2`
+
+Para obtener gráficos consistentes y personalizables, se utilizará `ggplot2`. En esta sección se construyen histogramas con curva normal, boxplots y gráficos Q-Q normales. Los Q-Q plots se implementan con `stat_qq()` y `stat_qq_line()`.
+
+```{r}
+# Instalar una sola vez si no tiene ggplot2:
+# install.packages("ggplot2")
+library(ggplot2)
+
+datos_puntaje <- data.frame(puntaje = puntaje)
+
+# Histograma con densidad normal teórica
+ggplot(datos_puntaje, aes(x = puntaje)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 bins = 10, fill = "grey80", color = "white") +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(puntaje), sd = sd(puntaje)),
+                linewidth = 1) +
+  labs(title = "Histograma de puntajes y curva normal",
+       x = "Puntaje", y = "Densidad") +
+  theme_minimal()
+```
+
+### .Boxplot con `ggplot2`
+
+```{r}
+ggplot(datos_puntaje, aes(x = "", y = puntaje)) +
+  geom_boxplot(width = 0.25, outlier.shape = 21,
+               fill = "grey85", color = "grey25") +
+  geom_jitter(width = 0.07, alpha = 0.65) +
+  labs(title = "Diagrama de caja de los puntajes",
+       x = NULL, y = "Puntaje") +
+  theme_minimal()
+```
+
+### .Gráfico Q-Q normal con `ggplot2`
+
+```{r}
+ggplot(datos_puntaje, aes(sample = puntaje)) +
+  stat_qq(size = 2, alpha = 0.8) +
+  stat_qq_line(linewidth = 1) +
+  labs(title = "Gráfico Q-Q normal de los puntajes",
+       x = "Cuantiles teóricos normales",
+       y = "Cuantiles muestrales") +
+  theme_minimal()
+```
+
+**Interpretación del Q-Q plot:** si los puntos siguen aproximadamente la línea de referencia, la normalidad resulta plausible. Una curvatura sistemática puede sugerir asimetría; desviaciones fuertes en los extremos pueden indicar colas pesadas, colas ligeras o valores atípicos. No se exige alineación perfecta, especialmente con muestras pequeñas.
+
+### .Q-Q plots por grupo
+
+En comparaciones de medias independientes, conviene examinar la distribución dentro de cada grupo. El siguiente ejemplo utiliza los datos de calificaciones definidos anteriormente.
+
+```{r}
+ggplot(datos, aes(sample = calificacion)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ grupo) +
+  labs(title = "Gráficos Q-Q normales por grupo",
+       x = "Cuantiles teóricos normales",
+       y = "Cuantiles muestrales") +
+  theme_minimal()
+```
+
+### .Q-Q plot de las diferencias pareadas
+
+En un diseño antes-después, el supuesto de normalidad de la prueba t pareada se refiere a las diferencias.
+
+```{r}
+# Definir los datos pareados antes de calcular las diferencias.
+# Se repiten aquí intencionalmente para que este bloque sea autónomo
+# y pueda ejecutarse aunque se renderice de forma independiente.
+antes <- c(62, 70, 68, 75, 64, 71, 69, 66, 73, 65, 72, 67)
+despues <- c(68, 73, 72, 78, 69, 75, 70, 71, 76, 70, 75, 71)
+diferencias <- despues - antes
+
+datos_diferencias <- data.frame(diferencias = diferencias)
+
+ggplot(datos_diferencias, aes(sample = diferencias)) +
+  stat_qq(size = 2) +
+  stat_qq_line(linewidth = 1) +
+  labs(title = "Q-Q normal de las diferencias pareadas",
+       x = "Cuantiles teóricos normales",
+       y = "Diferencias observadas") +
+  theme_minimal()
+```
+
+## .Independencia y diseño
+
+La independencia no se establece con Shapiro-Wilk ni con un boxplot: depende del diseño, del muestreo y de cómo se obtuvieron las observaciones. Mediciones repetidas sobre una misma persona no son independientes. En ese caso se usan métodos pareados o modelos que representen la dependencia.
+
+## .Igualdad de varianzas: prueba de Levene
+
+Para comparar medias de grupos independientes, puede interesar evaluar si las varianzas son similares. La prueba de Levene es más robusta frente a desviaciones de normalidad que la prueba clásica de Bartlett.
+
+```{r}
+# install.packages("car") # ejecutar una sola vez si hace falta
+if (requireNamespace("car", quietly = TRUE)) {
+  car::leveneTest(calificacion ~ grupo, data = datos, center = median)
+}
+```
+
+La hipótesis nula de Levene es que las varianzas poblacionales son iguales. Si su valor p es pequeño, hay evidencia contra la igualdad. Sin embargo, no es necesario seleccionar mecánicamente la prueba t agrupada o Welch con base en una prueba preliminar: la prueba de Welch suele ser una opción segura por defecto para dos grupos independientes.
+
+# .Prueba para una media con varianza poblacional conocida
+
+## .Cuándo se utiliza
+
+Se contrasta una media poblacional $\mu$ cuando la desviación estándar poblacional $\sigma$ se considera conocida. En aplicaciones reales, conocer exactamente $\sigma$ es poco frecuente. Se supone una muestra aleatoria independiente y normalidad poblacional para una inferencia exacta en muestras pequeñas; con muestras grandes, la aproximación normal puede ser razonable bajo condiciones apropiadas.
+
+## .Estadístico de prueba
+
+$$Z=\frac{\bar X-\mu_0}{\sigma/\sqrt n}.$$
+
+Donde $\bar X$ es la media muestral, $\mu_0$ el valor de referencia, $\sigma$ la desviación estándar poblacional conocida y $n$ el tamaño de la muestra.
+
+Para una prueba bilateral, se rechaza $H_0$ si $|Z|>z_{1-\alpha/2}$. En una prueba de cola derecha se rechaza si $Z>z_{1-\alpha}$; en una de cola izquierda, si $Z<z_\alpha$.
+
+## .Ejemplo resuelto en R
+
+Una institución afirma que el puntaje medio es 70 puntos. Se toma una muestra de 36 estudiantes; la media observada es 73 y se conoce, por información histórica confiable, que $\sigma=9$. Contrastar a nivel 5% si la media difiere de 70.
+
+$$H_0:\mu=70,\qquad H_1:\mu\ne70,\qquad \alpha=0.05.$$
+
+```{r}
+n <- 36
+x_bar <- 73
+sigma <- 9
+mu0 <- 70
+alpha <- 0.05
+
+z <- (x_bar - mu0) / (sigma / sqrt(n))
+p_valor <- 2 * pnorm(-abs(z))
+z_critico <- qnorm(1 - alpha / 2)
+ic <- x_bar + c(-1, 1) * qnorm(1 - alpha/2) * sigma/sqrt(n)
+
+c(Z = z, p_valor = p_valor, Z_critico = z_critico,
+  IC_inferior = ic[1], IC_superior = ic[2])
+```
+
+Conclusión: se rechaza $H_0$ si el valor p es menor que 0.05. El intervalo de confianza del 95% proporciona el rango de valores compatibles con los datos bajo el modelo. En este ejemplo, el estadístico es $Z=2$, y el valor p bilateral es aproximadamente 0.0455; por tanto, hay evidencia estadística de que la media difiere de 70 al 5%.
+
+**Nota:** `t.test()` no permite especificar una desviación estándar poblacional conocida. Por eso, el cálculo se realiza directamente con la distribución normal.
+
+# .Prueba para una media con varianza poblacional desconocida
+
+## .Distribución t de Student
+
+Cuando $\sigma$ es desconocida, se estima mediante la desviación estándar muestral $s$. Si la población es normal y las observaciones son independientes, el estadístico sigue una distribución t de Student con $n-1$ grados de libertad:
+
+$$t=\frac{\bar X-\mu_0}{s/\sqrt n},\qquad gl=n-1.$$
+
+La distribución t tiene colas más pesadas que la normal y considera la incertidumbre adicional por estimar la desviación estándar.
+
+## .Supuestos y diagnóstico
+
+- Variable cuantitativa.
+- Muestra aleatoria y observaciones independientes.
+- Normalidad aproximada de la población para inferencia exacta en muestras pequeñas.
+- Ausencia de valores extremos muy influyentes.
+- Con muestras mayores, la prueba suele ser robusta ante desviaciones moderadas, pero la asimetría fuerte y los valores extremos siguen siendo importantes.
+
+## .Ejemplo con datos muestrales
+
+Una muestra de 12 estudiantes presenta los siguientes puntajes. Se desea contrastar si la media poblacional difiere de 70.
+
+```{r}
+x <- c(68, 72, 75, 69, 71, 77, 65, 73, 70, 74, 67, 76)
+
+mean(x)
+sd(x)
+hist(x, probability = TRUE, main = "Puntajes muestrales", xlab = "Puntaje")
+qqnorm(x); qqline(x, col = "red", lwd = 2)
+shapiro.test(x)
+```
+
+Hipótesis bilateral:
+
+$$H_0:\mu=70,\qquad H_1:\mu\ne70.$$
+
+```{r}
+resultado_t <- t.test(x, mu = 70, alternative = "two.sided",
+                      conf.level = 0.95)
+resultado_t
+```
+
+`t.test()` informa la t observada, grados de libertad, valor p, intervalo de confianza y media estimada. Si $p<0.05$, se rechaza $H_0$; de lo contrario, no se rechaza.
+
+Para una hipótesis unilateral, se cambia `alternative` por `"greater"` o `"less"`. La dirección debe establecerse antes de analizar los resultados.
+
+# .Prueba de hipótesis para una proporción poblacional
+
+## .Parámetro y aproximación normal
+
+Sea $p$ la proporción poblacional de individuos que poseen una característica. La proporción muestral es:
+
+$$\hat p=\frac{x}{n},$$
+
+donde $x$ es el número de casos con la característica y $n$ el tamaño de la muestra.
+
+Para contrastar $H_0:p=p_0$, el estadístico aproximado es:
+
+$$Z=\frac{\hat p-p_0}{\sqrt{p_0(1-p_0)/n}}.$$
+
+La aproximación normal requiere un número suficiente de éxitos y fracasos esperados bajo $H_0$. Como regla orientativa, se suele revisar que $np_0$ y $n(1-p_0)$ sean al menos 5 o, de manera más conservadora, 10. Si la muestra es pequeña o los conteos son escasos, es preferible considerar una prueba binomial exacta.
+
+## .Ejemplo educativo
+
+Una universidad sostiene que al menos el 60% de sus estudiantes está satisfecho con la modalidad virtual. En una muestra de 150 estudiantes, 102 declaran estar satisfechos. Para evaluar si la proporción supera el 60%:
+
+$$H_0:p=0.60,\qquad H_1:p>0.60.$$
+
+```{r}
+x <- 102
+n <- 150
+p0 <- 0.60
+alpha <- 0.05
+
+phat <- x/n
+z_prop <- (phat - p0)/sqrt(p0*(1-p0)/n)
+p_valor <- pnorm(z_prop, lower.tail = FALSE)
+
+c(proporcion_muestral = phat, Z = z_prop, p_valor = p_valor)
+```
+
+También puede usarse una prueba binomial exacta:
+
+```{r}
+binom.test(x, n, p = p0, alternative = "greater", conf.level = 0.95)
+```
+
+La prueba exacta es válida sin recurrir a la aproximación normal, aunque puede ser conservadora. Para proporciones, no debe confundirse el intervalo de confianza elegido con el contraste unilateral: el método y la cola deben coincidir con la pregunta planteada.
+
+# .Prueba de hipótesis para una varianza poblacional
+
+## .Distribución chi-cuadrado
+
+Para una población normal, la hipótesis sobre la varianza $\sigma^2$ puede evaluarse mediante:
+
+$$\chi^2=\frac{(n-1)s^2}{\sigma_0^2},\qquad gl=n-1.$$
+
+Bajo $H_0:\sigma^2=\sigma_0^2$, el estadístico sigue una distribución chi-cuadrado con $n-1$ grados de libertad. Esta prueba es **muy sensible a la falta de normalidad**; la inspección gráfica y el conocimiento del proceso de muestreo son especialmente importantes.
+
+## .Ejemplo
+
+Se desea evaluar si la varianza poblacional de los puntajes es distinta de 64 puntos cuadrados. Se utiliza una muestra de 15 estudiantes.
+
+```{r}
+x_var <- c(68, 72, 75, 69, 71, 77, 65, 73, 70, 74, 67, 76, 80, 66, 72)
+n <- length(x_var)
+s2 <- var(x_var)
+sigma02 <- 64
+alpha <- 0.05
+
+qqnorm(x_var, main = "Q-Q plot para evaluar normalidad")
+qqline(x_var, col = "red", lwd = 2)
+shapiro.test(x_var)
+
+chi2 <- (n - 1) * s2 / sigma02
+gl <- n - 1
+p_valor <- 2 * min(pchisq(chi2, df = gl),
+                   pchisq(chi2, df = gl, lower.tail = FALSE))
+
+c(varianza_muestral = s2, chi_cuadrado = chi2,
+  gl = gl, p_valor = p_valor)
+```
+
+Hipótesis:
+
+$$H_0:\sigma^2=64,\qquad H_1:\sigma^2\ne64.$$
+
+La prueba bilateral utiliza ambas colas de la distribución chi-cuadrado. Si $p<\alpha$, se rechaza la hipótesis de varianza igual a 64. La interpretación es válida bajo el supuesto de normalidad poblacional.
+
+# .Prueba de diferencia de medias pareadas
+
+## .Diseño pareado
+
+Se utiliza cuando cada unidad se mide dos veces (por ejemplo, antes y después de una intervención) o cuando las observaciones se emparejan de forma justificada. No se deben tratar las mediciones de una misma persona como muestras independientes.
+
+Se define la diferencia por pareja como $D_i=X_{i,\text{después}}-X_{i,\text{antes}}$. La prueba equivale a una prueba t de una muestra aplicada a las diferencias:
+
+$$t=\frac{\bar D-\mu_{D,0}}{s_D/\sqrt n},\qquad gl=n-1.$$
+
+Generalmente, $\mu_{D,0}=0$.
+
+## .Supuestos
+
+- Las parejas se forman de manera válida.
+- Las diferencias entre parejas son independientes entre sí.
+- Las diferencias son aproximadamente normales si el número de parejas es pequeño.
+- Se revisan el boxplot y el Q-Q plot de las diferencias, no solo los de cada medición por separado.
+
+## .Ejemplo: puntaje antes y después
+
+```{r}
+antes <- c(62, 70, 68, 75, 64, 71, 69, 66, 73, 65, 72, 67)
+despues <- c(68, 73, 72, 78, 69, 75, 70, 71, 76, 70, 75, 71)
+diferencias <- despues - antes
+
+summary(diferencias)
+boxplot(diferencias, horizontal = TRUE,
+        main = "Diferencias: después - antes", xlab = "Diferencia")
+qqnorm(diferencias); qqline(diferencias, col = "red", lwd = 2)
+shapiro.test(diferencias)
+```
+
+Hipótesis bilateral:
+
+$$H_0:\mu_D=0,\qquad H_1:\mu_D\ne0.$$
+
+```{r}
+t.test(despues, antes, paired = TRUE,
+       alternative = "two.sided", conf.level = 0.95)
+```
+
+Si el valor p es pequeño, existe evidencia de una diferencia media distinta de cero. Si las diferencias son muy asimétricas o contienen valores extremos importantes, se puede considerar la prueba de rangos con signo de Wilcoxon (`wilcox.test(despues, antes, paired = TRUE)`), teniendo presente que su interpretación no es siempre una prueba de diferencia de medias.
+
+# .Diferencia de medias independientes con varianzas iguales
+
+## .Modelo y estadístico
+
+Se comparan dos grupos independientes. Bajo el supuesto de varianzas poblacionales iguales, se estima una varianza común agrupada:
+
+$$s_p^2=\frac{(n_1-1)s_1^2+(n_2-1)s_2^2}{n_1+n_2-2}.$$
+
+El estadístico de prueba es:
+
+$$t=\frac{(\bar X_1-\bar X_2)-\Delta_0}
+{s_p\sqrt{1/n_1+1/n_2}},
+\qquad gl=n_1+n_2-2.$$
+
+Habitualmente, $\Delta_0=0$.
+
+## .Supuestos
+
+- Grupos independientes y observaciones independientes dentro de cada grupo.
+- Variable cuantitativa.
+- Normalidad aproximada dentro de cada grupo para inferencia exacta en muestras pequeñas.
+- Varianzas poblacionales iguales.
+
+El test de Levene puede informar sobre la homogeneidad, pero no garantiza que el supuesto sea verdadero. Si la igualdad de varianzas no está bien sustentada, la prueba de Welch suele ser preferible.
+
+## .Ejemplo
+
+```{r}
+metodo_A <- c(68, 72, 70, 75, 69, 71, 73, 67, 74, 70, 72, 69)
+metodo_B <- c(75, 78, 72, 80, 76, 74, 79, 73, 77, 81, 75, 78)
+
+boxplot(metodo_A, metodo_B, names = c("Método A", "Método B"),
+        main = "Comparación de puntajes", ylab = "Puntaje")
+par(mfrow = c(1, 2))
+qqnorm(metodo_A, main = "Q-Q Método A"); qqline(metodo_A, col = "red")
+qqnorm(metodo_B, main = "Q-Q Método B"); qqline(metodo_B, col = "red")
+par(mfrow = c(1, 1))
+shapiro.test(metodo_A)
+shapiro.test(metodo_B)
+```
+
+Hipótesis bilateral:
+
+$$H_0:\mu_1-\mu_2=0,\qquad H_1:\mu_1-\mu_2\ne0.$$
+
+```{r}
+# Prueba de Levene, si está instalado el paquete car
+if (requireNamespace("car", quietly = TRUE)) {
+  grupo2 <- factor(c(rep("A", length(metodo_A)), rep("B", length(metodo_B))))
+  puntajes2 <- c(metodo_A, metodo_B)
+  print(car::leveneTest(puntajes2 ~ grupo2, center = median))
+}
+
+t.test(metodo_A, metodo_B, var.equal = TRUE,
+       alternative = "two.sided", conf.level = 0.95)
+```
+
+`var.equal = TRUE` solicita la prueba t con varianza agrupada. La conclusión debe acompañarse de la diferencia estimada entre medias y su intervalo de confianza.
+
+# .Diferencia de medias independientes con varianzas diferentes: Welch
+
+## .Estadístico de Welch
+
+La prueba t de Welch no exige igualdad de varianzas:
+
+$$t=\frac{(\bar X_1-\bar X_2)-\Delta_0}
+{\sqrt{s_1^2/n_1+s_2^2/n_2}}.$$
+
+Los grados de libertad se aproximan mediante la fórmula de Welch-Satterthwaite:
+
+$$\nu=
+\frac{(s_1^2/n_1+s_2^2/n_2)^2}
+{\frac{(s_1^2/n_1)^2}{n_1-1}+
+ \frac{(s_2^2/n_2)^2}{n_2-1}}.$$
+
+## .Ejemplo en R
+
+Se utilizan los mismos datos de los métodos A y B, pero sin asumir igualdad de varianzas.
+
+```{r}
+resultado_welch <- t.test(metodo_A, metodo_B,
+                          var.equal = FALSE,
+                          alternative = "two.sided",
+                          conf.level = 0.95)
+resultado_welch
+```
+
+En R, `var.equal = FALSE` es el valor predeterminado. La prueba de Welch suele funcionar bien incluso cuando las varianzas son similares y es una opción general recomendable para dos grupos independientes.
+
+## ¿Cuál prueba seleccionar?
+
+| Característica           | t agrupada         | Welch               |
+|--------------------------|--------------------|---------------------|
+| Grupos independientes    | Sí                 | Sí                  |
+| Supone varianzas iguales | Sí                 | No                  |
+| Grados de libertad       | $n_1+n_2-2$        | Aproximados         |
+| En R                     | `var.equal = TRUE` | `var.equal = FALSE` |
+
+No se recomienda decidir exclusivamente a partir de un test de igualdad de varianzas: considere el diseño, tamaños de grupo, dispersión y robustez del procedimiento.
+
+# .Diferencia de dos proporciones independientes
+
+## .Parámetros e hipótesis
+
+Sean $p_1$ y $p_2$ las proporciones poblacionales de dos grupos independientes. El interés puede estar en evaluar:
+
+$$H_0:p_1-p_2=0,\qquad H_1:p_1-p_2\ne0.$$
+
+Las proporciones muestrales son $\hat p_1=x_1/n_1$ y $\hat p_2=x_2/n_2$.
+
+Para la prueba z clásica bajo $H_0:p_1=p_2$, se utiliza la proporción combinada:
+
+$$\hat p_c=\frac{x_1+x_2}{n_1+n_2},$$
+
+$$Z=\frac{\hat p_1-\hat p_2}
+{\sqrt{\hat p_c(1-\hat p_c)(1/n_1+1/n_2)}}.$$
+
+La aproximación normal requiere conteos esperados suficientemente grandes. Si hay conteos escasos, se puede considerar una prueba exacta de Fisher.
+
+## .Ejemplo: satisfacción en dos programas
+
+En el programa A, 84 de 120 estudiantes están satisfechos; en el programa B, 66 de 110 están satisfechos. Se contrasta si las proporciones difieren.
+
+```{r}
+x1 <- 84; n1 <- 120
+x2 <- 66; n2 <- 110
+p1 <- x1/n1; p2 <- x2/n2
+pc <- (x1 + x2)/(n1 + n2)
+z <- (p1 - p2)/sqrt(pc*(1-pc)*(1/n1 + 1/n2))
+p_valor <- 2*pnorm(-abs(z))
+
+c(p1 = p1, p2 = p2, diferencia = p1-p2,
+  Z = z, p_valor = p_valor)
+```
+
+La prueba de Pearson para una tabla 2 × 2 ofrece una alternativa equivalente asintóticamente a la prueba z de dos proporciones sin corrección de continuidad:
+
+```{r}
+tabla <- matrix(c(x1, n1-x1, x2, n2-x2),
+                nrow = 2, byrow = TRUE,
+                dimnames = list(Grupo = c("A", "B"),
+                                Respuesta = c("Satisfecho", "No satisfecho")))
+tabla
+prop.test(x = c(x1, x2), n = c(n1, n2),
+          correct = FALSE, conf.level = 0.95)
+```
+
+`prop.test()` proporciona una prueba aproximada y un intervalo de confianza para las proporciones o su diferencia, según el caso. Para tablas con conteos esperados pequeños, examine:
+
+```{r}
+chisq.test(tabla)$expected
+fisher.test(tabla)
+```
+
+La prueba exacta de Fisher es una alternativa para tablas 2 × 2 cuando la aproximación chi-cuadrado puede ser inadecuada.
+
+# .Gráficos de las regiones críticas
+
+Los gráficos ayudan a visualizar la región de rechazo, pero la decisión formal debe basarse en el estadístico, el valor p y el nivel de significación previamente elegido.
+
+## .Región crítica bilateral para una prueba Z
+
+```{r}
+alpha <- 0.05
+zcrit <- qnorm(1 - alpha/2)
+curve(dnorm(x), from = -4, to = 4,
+      main = "Prueba Z bilateral, alfa = 0.05",
+      xlab = "Z", ylab = "Densidad", lwd = 2)
+xx <- seq(-4, -zcrit, length.out = 200)
+polygon(c(xx, rev(xx)), c(dnorm(xx), rep(0, length(xx))),
+        col = "grey75", border = NA)
+xx <- seq(zcrit, 4, length.out = 200)
+polygon(c(xx, rev(xx)), c(dnorm(xx), rep(0, length(xx))),
+        col = "grey75", border = NA)
+abline(v = c(-zcrit, zcrit), lty = 2, lwd = 2)
+```
+
+## .Región crítica bilateral para una prueba t
+
+```{r}
+alpha <- 0.05
+gl <- 11
+tcrit <- qt(1 - alpha/2, df = gl)
+curve(dt(x, df = gl), from = -4, to = 4,
+      main = paste("Prueba t bilateral; gl =", gl),
+      xlab = "t", ylab = "Densidad", lwd = 2)
+xx <- seq(-4, -tcrit, length.out = 200)
+polygon(c(xx, rev(xx)), c(dt(xx, gl), rep(0, length(xx))),
+        col = "grey75", border = NA)
+xx <- seq(tcrit, 4, length.out = 200)
+polygon(c(xx, rev(xx)), c(dt(xx, gl), rep(0, length(xx))),
+        col = "grey75", border = NA)
+abline(v = c(-tcrit, tcrit), lty = 2, lwd = 2)
+```
+
+# .Resumen para seleccionar la prueba
+
+| Objetivo | Prueba | Estadístico / función R | Supuesto clave |
+|------------------|------------------|------------------|------------------|
+| Una media, $\sigma$ conocida | Z de una media | Cálculo manual con `pnorm()` | $\sigma$ conocida; independencia |
+| Una media, $\sigma$ desconocida | t de una muestra | `t.test(x, mu=...)` | Independencia; normalidad aproximada en muestras pequeñas |
+| Una proporción | Binomial exacta o Z aproximada | `binom.test()` / cálculo Z | Ensayos binomiales independientes |
+| Una varianza | Chi-cuadrado | `pchisq()` | Población normal |
+| Diferencia pareada | t pareada | `t.test(x, y, paired=TRUE)` | Normalidad aproximada de las diferencias |
+| Dos medias, varianzas iguales | t agrupada | `t.test(x, y, var.equal=TRUE)` | Independencia, normalidad aproximada y varianzas iguales |
+| Dos medias, varianzas diferentes | t de Welch | `t.test(x, y)` | Independencia y normalidad aproximada en muestras pequeñas |
+| Dos proporciones independientes | Z / chi-cuadrado | `prop.test()` | Grupos independientes y conteos suficientes |
+
+# .Recomendaciones para informar resultados
+
+Un informe técnico debe incluir:
+
+1.  **Pregunta y parámetro:** qué se quiere estimar o contrastar.
+2.  **Hipótesis y nivel** $\alpha$: indicar si el contraste es bilateral o unilateral.
+3.  **Descripción de datos:** tamaño muestral, media y desviación estándar, o conteos y proporciones.
+4.  **Evaluación de supuestos:** describir gráficos y pruebas relevantes; no limitarse a decir “se cumple normalidad” por un valor p.
+5.  **Resultado inferencial:** estadístico, grados de libertad cuando corresponda, valor p e intervalo de confianza.
+6.  **Conclusión contextual:** responder a la pregunta sin afirmar causalidad si el diseño no la permite.
+7.  **Magnitud práctica:** informar diferencia estimada y, cuando corresponda, un tamaño del efecto.
+
+Ejemplo de redacción:
+
+> Se comparó la media de puntajes entre dos grupos independientes mediante la prueba t de Welch, sin asumir igualdad de varianzas. Se reportaron la diferencia de medias, el intervalo de confianza del 95%, el estadístico t, los grados de libertad aproximados y el valor p. La conclusión se formuló con respecto a la pregunta de investigación y no únicamente con base en la significación estadística.
+
+# .Paquetes de R útiles
+
+Las pruebas principales pueden ejecutarse con funciones de R base: `t.test()`, `binom.test()`, `prop.test()`, `shapiro.test()` y `chisq.test()`. Para gráficos más flexibles se utiliza `ggplot2`; para Levene se utiliza el paquete `car`.
+
+```{r}
+# Instalar una sola vez si hace falta:
+# install.packages(c("ggplot2", "car"))
+
+library(ggplot2)
+
+# Boxplot de las calificaciones por grupo
+ggplot(datos, aes(x = grupo, y = calificacion)) +
+  geom_boxplot(aes(fill = grupo), show.legend = FALSE) +
+  geom_jitter(width = 0.08, alpha = 0.6) +
+  labs(title = "Calificaciones por grupo",
+       x = "Grupo", y = "Calificación") +
+  theme_minimal()
+
+# Prueba de Levene:
+# car::leveneTest(calificacion ~ grupo, data = datos, center = median)
+```
+
+Los gráficos deben interpretarse junto con el diseño y los supuestos. La normalidad de los datos no se decide únicamente por una prueba de Shapiro-Wilk ni por un Q-Q plot; se valora el conjunto de evidencias.
+
+# .Actividad de aplicación
+
+Para cada situación, formule $H_0$ y $H_1$, identifique el procedimiento, examine los supuestos, ejecute el análisis en R y redacte una conclusión contextual.
+
+1.  Una muestra de estudiantes se utiliza para determinar si la media de calificaciones difiere de 3.5 sobre 5, con varianza poblacional desconocida.
+2.  Una entidad afirma que el 70% de los trámites se resuelve dentro del plazo. En una muestra de 100 trámites, 62 se resolvieron a tiempo. Evalúe la afirmación con una prueba apropiada.
+3.  Se mide el tiempo de atención a los mismos usuarios antes y después de una mejora. Determine si el tiempo medio cambió.
+4.  Se comparan los puntajes de dos cursos independientes. Justifique si utilizaría Welch o una prueba t agrupada.
+5.  Se compara la proporción de estudiantes satisfechos en dos programas académicos independientes.
+6.  Se desea contrastar si la varianza de los tiempos de atención es igual a un valor establecido. Explique por qué la normalidad es importante para esta prueba.
+
+## Consideración final
+
+Los procedimientos paramétricos no deben elegirse de forma automática. La elección depende del parámetro, el diseño, la independencia, la distribución de los datos, los tamaños muestrales y el objetivo científico. Los gráficos complementan las pruebas analíticas y el criterio del analista; no los reemplazan.
+
+# .Paquetes de R específicos para las pruebas de hipótesis
+
+R incluye funciones estadísticas para ejecutar las pruebas de hipótesis más comunes. Por tanto, **no es obligatorio instalar paquetes adicionales** para realizar los análisis principales de este documento. Los paquetes complementarios amplían las opciones de diagnóstico, visualización, presentación de resultados y cálculo de tamaños del efecto.
+
+## .Funciones de R base para las pruebas principales
+
+Las funciones que se presentan en la siguiente tabla pertenecen al paquete `stats`, que se instala junto con R.
+
+| Procedimiento | Función | Uso |
+|------------------------|------------------------|------------------------|
+| Media con varianza poblacional conocida | `pnorm()`, `qnorm()` | Calcular valores p y valores críticos para el estadístico Z, calculado con la fórmula correspondiente |
+| Media con varianza desconocida | `t.test()` | Prueba t de una muestra |
+| Proporción poblacional | `prop.test()`, `binom.test()` | Prueba aproximada o binomial exacta |
+| Varianza poblacional | `pchisq()`, `qchisq()` | Calcular valores p y valores críticos para el estadístico chi-cuadrado |
+| Diferencia de medias pareadas | `t.test(paired = TRUE)` | Comparación de mediciones emparejadas |
+| Dos medias independientes, varianzas iguales | `t.test(var.equal = TRUE)` | Prueba t con varianza agrupada |
+| Dos medias independientes, varianzas diferentes | `t.test()` | Prueba t de Welch, predeterminada en R |
+| Diferencia de dos proporciones | `prop.test()` | Comparación de proporciones |
+| Tabla de contingencia 2 × 2 | `fisher.test()` | Prueba exacta de Fisher |
+| Normalidad | `shapiro.test()` | Prueba de Shapiro-Wilk |
+
+**Nota:** las funciones `pnorm()` y `qnorm()` no ejecutan por sí solas una prueba Z de una media con desviación estándar poblacional conocida. Se calcula el estadístico con la fórmula y luego se obtiene el valor p o el valor crítico con dichas funciones. De manera similar, la prueba de una varianza poblacional se implementa calculando el estadístico chi-cuadrado y su valor p.
+
+## .Paquetes complementarios recomendados
+
+### `ggplot2`: visualización estadística
+
+Se utiliza para elaborar histogramas, diagramas de caja, gráficos Q-Q y comparaciones gráficas entre grupos.
+
+```{r}
+# Instalar una sola vez, si es necesario:
+# install.packages("ggplot2")
+
+library(ggplot2)
+
+# Boxplot con puntos observados por grupo
+ggplot(datos, aes(x = grupo, y = calificacion)) +
+  geom_boxplot(aes(fill = grupo), show.legend = FALSE) +
+  geom_jitter(width = 0.08, alpha = 0.6) +
+  labs(
+    title = "Distribución de calificaciones por método",
+    x = "Método",
+    y = "Calificación"
+  ) +
+  theme_minimal()
+```
+
+### `car`: homogeneidad de varianzas
+
+El paquete `car` incluye `leveneTest()`, que permite evaluar si las varianzas de varios grupos son compatibles con la hipótesis de igualdad.
+
+```{r}
+# Instalar una sola vez, si es necesario:
+# install.packages("car")
+
+if (requireNamespace("car", quietly = TRUE)) {
+  car::leveneTest(
+    calificacion ~ grupo,
+    data = datos,
+    center = median
+  )
+}
+```
+
+La hipótesis nula de Levene establece que las varianzas de los grupos son iguales. Un valor p pequeño aporta evidencia contra esa hipótesis. Esta prueba debe interpretarse junto con los gráficos, el diseño y el conocimiento del problema. Para dos grupos independientes, la prueba de Welch suele ser una opción razonable sin necesidad de decidir primero mediante una prueba de igualdad de varianzas.
+
+### `rstatix`: pruebas y resultados ordenados
+
+`rstatix` ofrece una interfaz práctica para realizar pruebas comunes y organizar sus resultados.
+
+```{r}
+# Instalar una sola vez, si es necesario:
+# install.packages("rstatix")
+
+if (requireNamespace("rstatix", quietly = TRUE)) {
+  # Prueba t para dos grupos independientes
+  rstatix::t_test(
+    datos,
+    calificacion ~ grupo,
+    var.equal = FALSE,
+    detailed = TRUE
+  )
+}
+```
+
+### `broom`: organizar resultados en tablas
+
+`broom` convierte resultados de muchas funciones estadísticas en tablas ordenadas, lo que facilita su incorporación a informes reproducibles.
+
+```{r}
+# Instalar una sola vez, si es necesario:
+# install.packages("broom")
+
+if (requireNamespace("broom", quietly = TRUE)) {
+  resultado <- t.test(
+    calificacion ~ grupo,
+    data = datos,
+    var.equal = FALSE
+  )
+
+  broom::tidy(resultado)
+}
+```
+
+### `effectsize`: magnitud de las diferencias
+
+El valor p indica la evidencia contra la hipótesis nula, pero no cuantifica por sí solo la magnitud o relevancia práctica de una diferencia. El paquete `effectsize` ofrece medidas como la d de Cohen para ciertos diseños.
+
+```{r}
+# Instalar una sola vez, si es necesario:
+# install.packages("effectsize")
+
+if (requireNamespace("effectsize", quietly = TRUE)) {
+  effectsize::cohens_d(
+    calificacion ~ grupo,
+    data = datos,
+    pooled_sd = FALSE
+  )
+}
+```
+
+La elección de una medida de tamaño del efecto debe corresponder al diseño y a la pregunta de investigación. En comparaciones de proporciones, pueden ser más apropiadas medidas como la diferencia de proporciones, el riesgo relativo o la razón de momios.
+
+## .Paquetes para pruebas adicionales de normalidad
+
+El paquete `nortest` incluye pruebas adicionales, como Anderson-Darling y Lilliefors. Estas pruebas pueden complementar, pero no reemplazan, el examen de los histogramas y gráficos Q-Q.
+
+```{r}
+# Instalar una sola vez, si es necesario:
+# install.packages("nortest")
+
+if (requireNamespace("nortest", quietly = TRUE)) {
+  nortest::ad.test(puntaje)
+  nortest::lillie.test(puntaje)
+}
+```
+
+El paquete `lawstat` también proporciona procedimientos para evaluar la homogeneidad de varianzas. No es necesario instalarlo si las funciones que se requieren ya están disponibles en los paquetes que utiliza el proyecto.
+
+## .Instalación de los paquetes complementarios
+
+Para instalar los paquetes opcionales utilizados en esta sección, ejecute una sola vez en la consola de R:
+
+```{r}
+# Ejecutar una sola vez; no es necesario repetir en cada renderizado.
+# install.packages(c(
+#   "ggplot2",
+#   "car",
+#   "rstatix",
+#   "broom",
+#   "effectsize",
+#   "nortest",
+#   "lawstat"
+# ))
+```
+
+Una vez instalados, puede cargar un paquete con `library(nombre_paquete)` o llamar a una función mediante `paquete::funcion()`. La segunda opción ayuda a identificar claramente de dónde procede cada función.
+
+## .Recomendación para este documento Quarto
+
+Para mantener el proyecto reproducible y fácil de ejecutar:
+
+- Utilice `stats` para las pruebas de hipótesis principales.
+- Utilice `ggplot2` para histogramas, boxplots y gráficos Q-Q.
+- Utilice `car` cuando necesite la prueba de Levene.
+- Utilice `broom` si desea presentar resultados en tablas ordenadas.
+- Utilice `effectsize` cuando el análisis requiera cuantificar la magnitud de una diferencia.
+- Utilice `rstatix` o `nortest` solo si necesita sus funciones específicas.
+
+No es necesario instalar ni cargar todos estos paquetes para cada análisis. Mantenga únicamente las dependencias que realmente utilice y recuerde que la evaluación de supuestos debe considerar el diseño, la independencia, los gráficos y la evidencia analítica.
